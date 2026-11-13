@@ -1,0 +1,88 @@
+# root/cache_dir/output_dir/checkpoint 的相对路径以本配置文件目录为基准。
+# splits 下的相对路径以 dataset.root 为基准。
+dataset:
+  root: D:\04_Datasets\MADOS\MADOS  # 必填，例如 'D:/Datasets/MADOS'，这一层应直接含 Scene_* 和 splits。
+  splits:
+    train: splits/train_X.txt
+    val: splits/val_X.txt
+    test: splits/test_X.txt
+  input_channels: 11
+  num_classes: 15
+  band_names: [B1, B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12]
+  class_names:
+    - Marine Debris
+    - Dense Sargassum
+    - Sparse Floating Algae
+    - Natural Organic Material
+    - Ship
+    - Oil Spill
+    - Marine Water
+    - Sediment-Laden Water
+    - Foam
+    - Turbid Water
+    - Shallow Water
+    - Waves & Wakes
+    - Oil Platform
+    - Jellyfish
+    - Sea snot
+  ignore_index: -1
+  normalization:
+    mean: [0.0582676, 0.05223386, 0.04381474, 0.0357083, 0.03412902, 0.03680401, 0.03999107, 0.03566642, 0.03965081, 0.0267993, 0.01978944]
+    std: [0.03240627, 0.03432253, 0.0354812, 0.0375769, 0.03785412, 0.04992323, 0.05884482, 0.05545856, 0.06423746, 0.04211187, 0.03019115]
+  cache_dir: .cache/mados  # null 关闭磁盘缓存。
+  max_samples: {train: null, val: null, test: null}  # 调试时可设为 2，正式实验保留 null。
+
+augmentation:
+  # 默认保留原作者的翻转/旋转概率。可按实验协议打开裁剪和缩放。
+  scale_range: [1.0, 1.0]  # 例如 [0.8, 1.2]。
+  crop_size: null  # 例如 [224, 224]，支持非正方形裁剪。
+  flip_probabilities: [0.2, 0.2, 0.2, 0.4]  # 水平、垂直、两者、保持方向。
+  rotation_probability: 0.8  # 触发后在 0/90/180/270 度中均匀选择。
+  ensure_labeled_crop: true
+  crop_attempts: 10
+
+model:
+  name: example
+  kwargs: {base_channels: 16}
+
+training:
+  batch_size: 4
+  epochs: 80
+  device: auto  # auto、cpu、cuda 或 cuda:0。
+  num_workers: 0
+  pin_memory: true
+  seed: 0
+  deterministic: true
+  optimizer: adam  # adam、adamw、sgd。
+  learning_rate: 0.0002
+  weight_decay: 0.0
+  momentum: 0.9  # SGD 使用。
+  grad_clip_norm: null
+  scheduler:
+    name: multistep  # none、multistep、cosine、plateau。
+    milestones: [45, 65]
+    gamma: 0.1
+    min_learning_rate: 0.0
+    factor: 0.5
+    patience: 5
+
+loss:
+  name: cross_entropy  # cross_entropy、focal。
+  class_weights: mados  # 作者的 1/log(1.03+p) 权重。null 为等权，也可写 15 个正数。
+  weight_parameter: 1.03
+  label_smoothing: 0.0
+  focal_gamma: 2.0
+
+metrics:
+  absent_class_policy: exclude  # exclude 排除真值和预测均缺席的类别，include 将其按 0 计入。
+
+evaluation:
+  split: test
+  checkpoint: null  # null 使用 output_dir/checkpoints/best.pth。
+  batch_size: 1
+  save_predictions: true
+  max_saved_predictions: null  # 只限制导出数量，不改变评估样本数量。
+  rgb_indices: [3, 2, 1]  # 0 起始索引，对应 B4/B3/B2。
+  rgb_percentiles: [2, 98]
+
+output_dir: outputs
