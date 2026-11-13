@@ -24,8 +24,6 @@ CLASS_COLORS = (
 def plot_training_curves(csv_path, output_dir):
     with Path(csv_path).open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
-    if not rows:
-        raise ValueError("Cannot plot an empty metrics.csv")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     epochs = [int(row["epoch"]) for row in rows]
@@ -50,10 +48,6 @@ def plot_training_curves(csv_path, output_dir):
 
 
 def make_rgb(image, indices=(3, 2, 1), percentiles=(2, 98)):
-    if len(indices) != 3 or any(index < 0 or index >= image.shape[0] for index in indices):
-        raise ValueError("rgb_indices must contain three valid zero-based band indices")
-    if len(percentiles) != 2 or not 0 <= percentiles[0] < percentiles[1] <= 100:
-        raise ValueError("rgb_percentiles must be an increasing pair within 0..100")
     rgb = np.zeros((*image.shape[1:], 3), dtype=np.float32)
     for channel, band_index in enumerate(indices):
         band = image[band_index]
@@ -79,8 +73,6 @@ class PredictionWriter:
         self.class_names = class_names
         self.saved = []
         self.max_saved = config.get("max_saved_predictions")
-        if self.max_saved is not None and (not isinstance(self.max_saved, int) or self.max_saved < 0):
-            raise ValueError("max_saved_predictions must be a nonnegative integer or null")
 
     def __call__(self, batch, predictions):
         predictions = predictions.detach().cpu().numpy()
@@ -89,8 +81,6 @@ class PredictionWriter:
                 return
             index = self.dataset.index_by_id[sample_id]
             image, target = self.dataset.read_raw(index)
-            if tuple(target.shape) != tuple(shape):
-                raise ValueError("Prediction export requires unaugmented samples at their original size")
             prediction = prediction[:shape[0], :shape[1]].astype(np.uint8) + 1
             self._save_sample(index, image, target.astype(np.uint8), prediction)
 

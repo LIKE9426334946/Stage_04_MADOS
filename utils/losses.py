@@ -17,28 +17,15 @@ class SegmentationLoss(nn.Module):
     def __init__(self, config, num_classes, ignore_index):
         super().__init__()
         self.name = config["name"]
-        if self.name not in {"cross_entropy", "focal"}:
-            raise ValueError("Supported losses: cross_entropy, focal")
         self.ignore_index = ignore_index
         self.label_smoothing = float(config.get("label_smoothing", 0.0))
         self.gamma = float(config.get("focal_gamma", 2.0))
-        if not 0 <= self.label_smoothing < 1 or self.gamma < 0:
-            raise ValueError("Invalid label_smoothing or focal_gamma")
-        if self.name == "focal" and self.label_smoothing != 0:
-            raise ValueError("Set label_smoothing=0 when using focal loss")
         weights = config.get("class_weights")
         if isinstance(weights, str):
-            if weights != "mados" or num_classes != 15:
-                raise ValueError("The named 'mados' weights require the original 15 classes")
             c = float(config.get("weight_parameter", 1.03))
-            if c <= 1:
-                raise ValueError("weight_parameter must be greater than 1")
             weights = 1 / torch.log(c + torch.tensor(CLASS_DISTRIBUTION, dtype=torch.float32))
         elif weights is not None:
             weights = torch.tensor(weights, dtype=torch.float32)
-        if weights is not None:
-            if weights.shape != (num_classes,) or not torch.isfinite(weights).all() or (weights <= 0).any():
-                raise ValueError("class_weights must contain one finite positive weight per class")
         self.register_buffer("weights", weights)
 
     def components(self, logits, targets):

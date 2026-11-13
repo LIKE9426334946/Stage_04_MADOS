@@ -9,7 +9,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import tempfile
 
 import numpy as np
@@ -54,19 +53,8 @@ class Patch:
 
 
 def read_split(path):
-    """Read a TXT split without silently discarding duplicate/malformed IDs."""
-    path = Path(path)
-    if not path.is_file():
-        raise FileNotFoundError(f"Missing MADOS split file: {path}")
-    identifiers = path.read_text(encoding="utf-8-sig").split()
-    if not identifiers:
-        raise ValueError(f"Empty MADOS split: {path}")
-    if len(identifiers) != len(set(identifiers)):
-        raise ValueError(f"Duplicate sample IDs in {path}")
-    for identifier in identifiers:
-        if not re.fullmatch(r"Scene_\d+_\d+", identifier):
-            raise ValueError(f"Malformed sample ID {identifier!r} in {path}")
-    return identifiers
+    """Read sample IDs from an official TXT split."""
+    return Path(path).read_text(encoding="utf-8-sig").split()
 
 
 class MADOSDataset(Dataset):
@@ -82,32 +70,17 @@ class MADOSDataset(Dataset):
         max_samples=None,
     ):
         self.root = Path(root).expanduser().resolve()
-        if not self.root.is_dir():
-            raise FileNotFoundError(f"MADOS dataset root does not exist: {self.root}")
-        if split not in {"train", "val", "test"}:
-            raise ValueError(f"Unknown split: {split}")
-        if 0 <= ignore_index < len(CLASS_NAMES):
-            raise ValueError("ignore_index must be outside the training classes 0..14")
         self.ignore_index = int(ignore_index)
         self.split = split
         self.transform = transform
         self.mean = np.asarray(mean, dtype=np.float32)
         self.std = np.asarray(std, dtype=np.float32)
-        if self.mean.shape != (11,) or self.std.shape != (11,):
-            raise ValueError("MADOS normalization requires 11 means and 11 standard deviations")
-        if not np.isfinite(self.mean).all() or not np.isfinite(self.std).all() or (self.std <= 0).any():
-            raise ValueError("Normalization values must be finite and standard deviations positive")
         self.mean_tensor = torch.from_numpy(self.mean.copy())[:, None, None]
         self.std_tensor = torch.from_numpy(self.std.copy())[:, None, None]
-        self.split_file = Path(split_file or f"splits/{split}_X.txt")
-        if not self.split_file.is_absolute():
-            self.split_file = self.root / self.split_file
+        self.split_file = self.root / (split_file or f"splits/{split}_X.txt")
         identifiers = read_split(self.split_file)
         self.official_split_size = len(identifiers)
-        if max_samples is not None:
-            if not isinstance(max_samples, int) or isinstance(max_samples, bool) or max_samples <= 0:
-                raise ValueError("max_samples must be a positive integer or null")
-            identifiers = identifiers[:max_samples]
+        identifiers = identifiers[:max_samples]
         self.samples = [self._index_patch(identifier) for identifier in identifiers]
         self.index_by_id = {sample.sample_id: i for i, sample in enumerate(self.samples)}
         self.cache_dir = Path(cache_dir).resolve() if cache_dir else None
@@ -118,16 +91,8 @@ class MADOSDataset(Dataset):
         scene_name, crop = sample_id.rsplit("_", 1)
         scene_dir = self.root / scene_name
         mask_path = scene_dir / "10" / f"{scene_name}_L2R_cl_{crop}.tif"
-        if not mask_path.is_file():
-            raise FileNotFoundError(f"Missing 10 m label for {sample_id}: {mask_path}")
         paths = list(scene_dir.glob(f"*/{scene_name}_L2R_rhorc_*_{crop}.tif"))
         paths.sort(key=lambda path: int(path.stem.split("_")[-2]))
-        if len(paths) != 11:
-            raise ValueError(f"{sample_id}: expected 11 reflectance bands, found {len(paths)}")
-        for path, (name, wavelengths, resolution) in zip(paths, BAND_SPECS):
-            wavelength = int(path.stem.split("_")[-2])
-            if wavelength not in wavelengths or path.parent.name != str(resolution):
-                raise ValueError(f"{sample_id}: unexpected band/order for {name}: {path}")
         return Patch(sample_id, tuple(paths), mask_path)
 
     def __len__(self):
@@ -145,26 +110,14 @@ class MADOSDataset(Dataset):
     @staticmethod
     def _read_tiffs(sample):
         with rasterio.open(sample.mask_path) as src:
-            if src.count != 1:
-                raise ValueError(f"Expected a single-band label: {sample.mask_path}")
-            raw_mask = src.read(1)
-        if not np.isfinite(raw_mask).all() or not np.equal(raw_mask, np.floor(raw_mask)).all():
-            raise ValueError(f"Non-integer or non-finite labels in {sample.mask_path}")
-        if raw_mask.min() < 0 or raw_mask.max() > 15:
-            raise ValueError(f"Raw MADOS labels must be in 0..15: {sample.mask_path}")
-        mask = raw_mask.astype(np.int64)
+            mask = src.read(1).astype(np.int64)
         bands = []
         for path in sample.image_paths:
             factor = int(path.parent.name) // 10
             with rasterio.open(path) as src:
-                expected_shape = (src.height * factor, src.width * factor)
-                if src.count != 1 or expected_shape != mask.shape:
-                    raise ValueError(f"Band/label spatial size mismatch in {sample.sample_id}: {path}")
-                band = src.read(1, out_shape=expected_shape, resampling=Resampling.nearest)
+                band = src.read(1, out_shape=(src.height * factor, src.width * factor), resampling=Resampling.nearest)
             bands.append(band)
         image = np.stack(bands).astype(np.float32)
-        if np.isinf(image).any():
-            raise ValueError(f"Infinite reflectance values in {sample.sample_id}")
         return image, mask
 
     def read_raw(self, index):
@@ -179,12 +132,7 @@ class MADOSDataset(Dataset):
         cache_path = self._cache_path(sample)
         if cache_path.is_file():
             with np.load(cache_path, allow_pickle=False) as cached:
-                image, mask = cached["image"].copy(), cached["mask"].copy()
-            if image.shape != (11, *mask.shape) or image.dtype != np.float32 or mask.dtype != np.int64:
-                raise ValueError(f"Invalid cache arrays: {cache_path}. Remove this file and retry.")
-            if np.isinf(image).any() or mask.min() < 0 or mask.max() > 15:
-                raise ValueError(f"Invalid cache values: {cache_path}. Remove this file and retry.")
-            return image, mask
+                return cached["image"].copy(), cached["mask"].copy()
         image, mask = self._read_tiffs(sample)
         temporary_path = None
         try:
@@ -208,8 +156,6 @@ class MADOSDataset(Dataset):
         if self.transform is not None:
             image, mask = self.transform(image, mask)
         image = (image - self.mean_tensor) / self.std_tensor
-        if not torch.isfinite(image).all():
-            raise ValueError(f"Non-finite processed image: {self.samples[index].sample_id}")
         return {"image": image.contiguous(), "mask": mask.contiguous(), "id": self.samples[index].sample_id}
 
 

@@ -6,8 +6,6 @@ from segmentation_models_pytorch import metrics as smp_metrics
 
 class SegmentationMetrics:
     def __init__(self, num_classes, ignore_index, absent_class_policy="exclude"):
-        if absent_class_policy not in {"exclude", "include"}:
-            raise ValueError("absent_class_policy must be 'exclude' or 'include'")
         self.num_classes = num_classes
         self.ignore_index = ignore_index
         self.absent_class_policy = absent_class_policy
@@ -17,11 +15,6 @@ class SegmentationMetrics:
     def update(self, predictions, targets):
         predictions = predictions.detach().to(device="cpu", dtype=torch.int64)
         targets = targets.detach().to(device="cpu", dtype=torch.int64)
-        invalid = (targets != self.ignore_index) & ((targets < 0) | (targets >= self.num_classes))
-        if invalid.any():
-            raise ValueError("Metric targets contain invalid training labels")
-        if (predictions < 0).any() or (predictions >= self.num_classes).any():
-            raise ValueError("Metric predictions must be class IDs in 0..num_classes-1")
         batch_stats = smp_metrics.get_stats(
             predictions, targets, mode="multiclass", num_classes=self.num_classes,
             ignore_index=self.ignore_index,
@@ -32,8 +25,6 @@ class SegmentationMetrics:
     def compute(self):
         tp, fp, fn, tn = self.stats
         support = (tp + fn).squeeze(0)
-        if support.sum() == 0:
-            raise ValueError("This split/epoch contains no annotated pixels")
         union = (tp + fp + fn).squeeze(0)
         included = union > 0
         if self.absent_class_policy == "include":

@@ -19,21 +19,11 @@ def evaluate(config, checkpoint_path=None, split=None):
     output = Path(config["output_dir"])
     split = split or config["evaluation"]["split"]
     checkpoint_path = Path(checkpoint_path or config["evaluation"]["checkpoint"] or output / "checkpoints" / "best.pth")
-    if split not in {"train", "val", "test"}:
-        raise ValueError(f"Unknown evaluation split: {split}")
-    if not checkpoint_path.is_file():
-        raise FileNotFoundError(f"Checkpoint does not exist: {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-    saved_config = checkpoint["config"]
-    for key in ("input_channels", "num_classes", "band_names", "class_names", "normalization", "ignore_index"):
-        if saved_config["dataset"][key] != config["dataset"][key]:
-            raise ValueError(f"dataset.{key} differs from the checkpoint's training configuration")
-    if saved_config["model"] != config["model"]:
-        raise ValueError("model configuration differs from the checkpoint's training configuration")
     seed_everything(config["training"]["seed"], config["training"]["deterministic"])
     device = select_device(config["training"]["device"])
     model = build_model(
-        saved_config["model"], config["dataset"]["input_channels"], config["dataset"]["num_classes"]
+        config["model"], config["dataset"]["input_channels"], config["dataset"]["num_classes"]
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"], strict=True)
     criterion = build_loss(config["loss"], config["dataset"]["num_classes"], config["dataset"]["ignore_index"]).to(

@@ -18,14 +18,6 @@ class JointTransform:
         self.seed = int(seed)
         self.generator = None
         self.generator_seed = None
-        if len(self.scale_range) != 2 or not 0 < self.scale_range[0] <= self.scale_range[1]:
-            raise ValueError("scale_range must be [positive_minimum, maximum]")
-        if self.crop_size is not None and (len(self.crop_size) != 2 or any(int(v) != v or v <= 0 for v in self.crop_size)):
-            raise ValueError("crop_size must be [positive_height, positive_width] or null")
-        if len(self.flip_probabilities) != 4 or any(p < 0 for p in self.flip_probabilities) or abs(sum(self.flip_probabilities) - 1) > 1e-6:
-            raise ValueError("flip_probabilities must contain horizontal, vertical, both, none probabilities summing to 1")
-        if not 0 <= self.rotation_probability <= 1 or self.crop_attempts < 1:
-            raise ValueError("Invalid rotation_probability or crop_attempts")
 
     def __call__(self, image, mask):
         # Keep augmentation independent of model initialization and dropout.

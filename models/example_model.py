@@ -20,8 +20,6 @@ class ConvBlock(nn.Sequential):
 class ExampleModel(nn.Module):
     def __init__(self, in_channels, num_classes, base_channels=16):
         super().__init__()
-        if min(in_channels, num_classes, base_channels) < 1:
-            raise ValueError("Model channel counts must be positive")
         self.encoder1 = ConvBlock(in_channels, base_channels)
         self.encoder2 = ConvBlock(base_channels, base_channels * 2)
         self.bottleneck = ConvBlock(base_channels * 2, base_channels * 4)
@@ -31,8 +29,6 @@ class ExampleModel(nn.Module):
         self.classifier = nn.Conv2d(base_channels, num_classes, 1)
 
     def forward(self, image):
-        if min(image.shape[-2:]) < 4:
-            raise ValueError("ExampleModel requires image height and width >= 4")
         skip1 = self.encoder1(image)
         skip2 = self.encoder2(self.pool(skip1))
         features = self.bottleneck(self.pool(skip2))
